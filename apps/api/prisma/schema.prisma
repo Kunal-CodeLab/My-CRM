@@ -1,0 +1,382 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_APP_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model User {
+  id           String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  email        String       @unique @db.VarChar(255)
+  passwordHash String       @map("password_hash") @db.VarChar(255)
+  firstName    String       @map("first_name") @db.VarChar(100)
+  lastName     String       @map("last_name") @db.VarChar(100)
+  isSuperadmin Boolean      @default(false) @map("is_superadmin")
+  createdAt    DateTime     @default(now()) @map("created_at") @db.Timestamptz()
+  updatedAt    DateTime     @default(now()) @updatedAt @map("updated_at") @db.Timestamptz()
+  memberships  Membership[]
+  families     RefreshTokenFamily[]
+
+  @@map("users")
+}
+
+model Organization {
+  id           String                   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name         String                   @db.VarChar(255)
+  slug         String                   @unique @db.VarChar(63)
+  status       String                   @default("active") @db.VarChar(32)
+  legalHold    Boolean                  @default(false) @map("legal_hold")
+  createdAt    DateTime                 @default(now()) @map("created_at") @db.Timestamptz()
+  updatedAt    DateTime                 @default(now()) @updatedAt @map("updated_at") @db.Timestamptz()
+  memberships  Membership[]
+  invitations  OrganizationInvitation[]
+  quotas       TenantQuota[]
+  accounts     Account[]
+  contacts     Contact[]
+  pipelines    Pipeline[]
+  dealStages   DealStage[]
+  deals        Deal[]
+  activities   Activity[]
+  outboxEvents OutboxEvent[]
+  snapshots    ExportSnapshot[]
+  auditLogs    AuditLog[]
+  importJobs   ImportJob[]
+
+  @@map("organizations")
+}
+
+model Membership {
+  id             String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId       String       @map("tenant_id") @db.Uuid
+  userId         String       @map("user_id") @db.Uuid
+  role           String       @db.VarChar(32)
+  status         String       @default("active") @db.VarChar(32)
+  sessionVersion Int          @default(1) @map("session_version")
+  createdAt      DateTime     @default(now()) @map("created_at") @db.Timestamptz()
+  updatedAt      DateTime     @default(now()) @updatedAt @map("updated_at") @db.Timestamptz()
+
+  organization   Organization @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  ownedAccounts   Account[]
+  ownedContacts   Contact[]
+  ownedDeals      Deal[]
+  createdActivities Activity[]
+
+  @@unique([tenantId, userId], map: "uq_memberships_tenant_user")
+  @@unique([tenantId, id], map: "uq_memberships_tenant_id")
+  @@map("memberships")
+}
+
+model OrganizationInvitation {
+  id           String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId     String       @map("tenant_id") @db.Uuid
+  email        String       @db.VarChar(255)
+  role         String       @db.VarChar(32)
+  tokenHash    String       @unique @map("token_hash") @db.VarChar(64)
+  status       String       @default("pending") @db.VarChar(32)
+  expiresAt    DateTime     @map("expires_at") @db.Timestamptz()
+  acceptedAt   DateTime?    @map("accepted_at") @db.Timestamptz()
+  createdAt    DateTime     @default(now()) @map("created_at") @db.Timestamptz()
+
+  organization Organization @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@map("organization_invitations")
+}
+
+model RefreshTokenFamily {
+  id                   String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId               String         @map("user_id") @db.Uuid
+  isRevoked            Boolean        @default(false) @map("is_revoked")
+  activeTokenId        String?        @map("active_token_id") @db.Uuid
+  encryptedActiveTokens Bytes?        @map("encrypted_active_tokens")
+  activeUpdatedAt      DateTime?      @map("active_updated_at") @db.Timestamptz()
+  createdAt            DateTime       @default(now()) @map("created_at") @db.Timestamptz()
+  updatedAt            DateTime       @default(now()) @updatedAt @map("updated_at") @db.Timestamptz()
+
+  user                 User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokens               RefreshToken[]
+
+  @@map("refresh_token_families")
+}
+
+model RefreshToken {
+  id               String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  familyId         String             @map("family_id") @db.Uuid
+  tokenHash        String             @unique @map("token_hash") @db.VarChar(64)
+  rotatedAt        DateTime?          @map("rotated_at") @db.Timestamptz()
+  successorTokenId String?            @map("successor_token_id") @db.Uuid
+  expiresAt        DateTime           @map("expires_at") @db.Timestamptz()
+  createdAt        DateTime           @default(now()) @map("created_at") @db.Timestamptz()
+
+  family           RefreshTokenFamily @relation(fields: [familyId], references: [id], onDelete: Cascade)
+
+  @@map("refresh_tokens")
+}
+
+model TenantQuota {
+  tenantId     String       @map("tenant_id") @db.Uuid
+  metric       String       @db.VarChar(50)
+  currentCount Int          @default(0) @map("current_count")
+  maxLimit     Int          @map("max_limit")
+  updatedAt    DateTime     @default(now()) @updatedAt @map("updated_at") @db.Timestamptz()
+
+  organization Organization @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@id([tenantId, metric])
+  @@map("tenant_quotas")
+}
+
+model Account {
+  id            String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId      String       @map("tenant_id") @db.Uuid
+  ownerId       String?      @map("owner_id") @db.Uuid
+  name          String       @db.VarChar(255)
+  domain        String?      @db.VarChar(255)
+  industry      String?      @db.VarChar(100)
+  annualRevenue Decimal?     @map("annual_revenue") @db.Decimal(15, 2)
+  deletedAt     DateTime?    @map("deleted_at") @db.Timestamptz()
+  createdAt     DateTime     @default(now()) @map("created_at") @db.Timestamptz()
+  updatedAt     DateTime     @default(now()) @updatedAt @map("updated_at") @db.Timestamptz()
+
+  organization  Organization @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  owner         Membership?  @relation(fields: [tenantId, ownerId], references: [tenantId, userId], onDelete: Restrict)
+
+  contacts      Contact[]
+  deals         Deal[]
+  activities    Activity[]
+
+  @@unique([tenantId, id], map: "uq_accounts_tenant_id")
+  @@map("accounts")
+}
+
+model Contact {
+  id           String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId     String       @map("tenant_id") @db.Uuid
+  accountId    String?      @map("account_id") @db.Uuid
+  ownerId      String?      @map("owner_id") @db.Uuid
+  firstName    String       @map("first_name") @db.VarChar(100)
+  lastName     String       @map("last_name") @db.VarChar(100)
+  email        String?      @db.VarChar(255)
+  phone        String?      @db.VarChar(50)
+  jobTitle     String?      @map("job_title") @db.VarChar(100)
+  deletedAt    DateTime?    @map("deleted_at") @db.Timestamptz()
+  createdAt    DateTime     @default(now()) @map("created_at") @db.Timestamptz()
+  updatedAt    DateTime     @default(now()) @updatedAt @map("updated_at") @db.Timestamptz()
+
+  organization Organization @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  account      Account?     @relation(fields: [tenantId, accountId], references: [tenantId, id], onDelete: Restrict)
+  owner        Membership?  @relation(fields: [tenantId, ownerId], references: [tenantId, userId], onDelete: Restrict)
+
+  deals        Deal[]
+  activities   Activity[]
+
+  @@unique([tenantId, id], map: "uq_contacts_tenant_id")
+  @@map("contacts")
+}
+
+model Pipeline {
+  id           String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId     String       @map("tenant_id") @db.Uuid
+  name         String       @db.VarChar(100)
+  isDefault    Boolean      @default(false) @map("is_default")
+  createdAt    DateTime     @default(now()) @map("created_at") @db.Timestamptz()
+
+  organization Organization @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  stages       DealStage[]
+
+  @@unique([tenantId, id], map: "uq_pipelines_tenant_id")
+  @@map("pipelines")
+}
+
+model DealStage {
+  id                    String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId              String       @map("tenant_id") @db.Uuid
+  pipelineId            String       @map("pipeline_id") @db.Uuid
+  name                  String       @db.VarChar(100)
+  displayOrder          Int          @map("display_order")
+  probabilityPercentage Int          @default(0) @map("probability_percentage")
+  isWon                 Boolean      @default(false) @map("is_won")
+  isLost                Boolean      @default(false) @map("is_lost")
+  createdAt             DateTime     @default(now()) @map("created_at") @db.Timestamptz()
+
+  organization          Organization @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  pipeline              Pipeline     @relation(fields: [tenantId, pipelineId], references: [tenantId, id], onDelete: Cascade)
+  deals                 Deal[]
+
+  @@unique([tenantId, pipelineId, id], map: "uq_deal_stages_tenant_pipeline_id")
+  @@unique([tenantId, id], map: "uq_deal_stages_tenant_id")
+  @@map("deal_stages")
+}
+
+model Deal {
+  id                String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId          String       @map("tenant_id") @db.Uuid
+  title             String       @db.VarChar(255)
+  value             Decimal      @default(0.00) @db.Decimal(15, 2)
+  currency          String       @default("USD") @db.VarChar(3)
+  accountId         String?      @map("account_id") @db.Uuid
+  primaryContactId  String?      @map("primary_contact_id") @db.Uuid
+  pipelineId        String       @map("pipeline_id") @db.Uuid
+  stageId           String       @map("stage_id") @db.Uuid
+  ownerId           String?      @map("owner_id") @db.Uuid
+  version           Int          @default(1)
+  expectedCloseDate DateTime?    @map("expected_close_date") @db.Date
+  lostReason        String?      @map("lost_reason")
+  deletedAt         DateTime?    @map("deleted_at") @db.Timestamptz()
+  createdAt         DateTime     @default(now()) @map("created_at") @db.Timestamptz()
+  updatedAt         DateTime     @default(now()) @updatedAt @map("updated_at") @db.Timestamptz()
+
+  organization      Organization @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  account           Account?     @relation(fields: [tenantId, accountId], references: [tenantId, id], onDelete: Restrict)
+  primaryContact    Contact?     @relation(fields: [tenantId, primaryContactId], references: [tenantId, id], onDelete: SetNull)
+  stage             DealStage    @relation(fields: [tenantId, pipelineId, stageId], references: [tenantId, pipelineId, id], onDelete: Restrict)
+  owner             Membership?  @relation(fields: [tenantId, ownerId], references: [tenantId, userId], onDelete: Restrict)
+
+  activities        Activity[]
+
+  @@unique([tenantId, id], map: "uq_deals_tenant_id")
+  @@map("deals")
+}
+
+model Activity {
+  id          String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId    String       @map("tenant_id") @db.Uuid
+  type        String       @db.VarChar(50)
+  subject     String       @db.VarChar(255)
+  body        String?
+  dueDate     DateTime?    @map("due_date") @db.Timestamptz()
+  completedAt DateTime?    @map("completed_at") @db.Timestamptz()
+  dealId      String?      @map("deal_id") @db.Uuid
+  contactId   String?      @map("contact_id") @db.Uuid
+  accountId   String?      @map("account_id") @db.Uuid
+  createdById String       @map("created_by_id") @db.Uuid
+  createdAt   DateTime     @default(now()) @map("created_at") @db.Timestamptz()
+
+  organization Organization @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  deal         Deal?        @relation(fields: [tenantId, dealId], references: [tenantId, id], onDelete: Cascade)
+  contact      Contact?     @relation(fields: [tenantId, contactId], references: [tenantId, id], onDelete: Cascade)
+  account      Account?     @relation(fields: [tenantId, accountId], references: [tenantId, id], onDelete: Cascade)
+  creator      Membership   @relation(fields: [tenantId, createdById], references: [tenantId, userId], onDelete: Restrict)
+
+  @@unique([tenantId, id], map: "uq_activities_tenant_id")
+  @@map("activities")
+}
+
+model OutboxEvent {
+  id             String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId       String       @map("tenant_id") @db.Uuid
+  actorId        String?      @map("actor_id") @db.Uuid
+  eventType      String       @map("event_type") @db.VarChar(100)
+  payload        Json
+  status         String       @default("PENDING") @db.VarChar(20)
+  claimToken     String?      @map("claim_token") @db.Uuid
+  fenceToken     Int          @default(0) @map("fence_token")
+  claimedAt      DateTime?    @map("claimed_at") @db.Timestamptz()
+  idempotencyKey String       @unique @map("idempotency_key") @db.VarChar(100)
+  createdAt      DateTime     @default(now()) @map("created_at") @db.Timestamptz()
+  updatedAt      DateTime     @default(now()) @updatedAt @map("updated_at") @db.Timestamptz()
+
+  organization   Organization @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  snapshots      ExportSnapshot[]
+
+  @@map("outbox_events")
+}
+
+model ExportSnapshot {
+  id             String                @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId       String                @map("tenant_id") @db.Uuid
+  outboxId       String                @map("outbox_id") @db.Uuid
+  generationId   Int                   @default(1) @map("generation_id")
+  workerToken    String?               @map("worker_token") @db.Uuid
+  status         String                @default("PENDING") @db.VarChar(30)
+  totalChunks    Int                   @default(0) @map("total_chunks")
+  sha256Checksum String?               @map("sha256_checksum") @db.VarChar(64)
+  byteLength     BigInt                @default(0) @map("byte_length")
+  createdAt      DateTime              @default(now()) @map("created_at") @db.Timestamptz()
+
+  organization   Organization          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  outbox         OutboxEvent           @relation(fields: [outboxId], references: [id], onDelete: Cascade)
+  chunks         ExportSnapshotChunk[]
+
+  @@map("export_snapshots")
+}
+
+model ExportSnapshotChunk {
+  snapshotId   String         @map("snapshot_id") @db.Uuid
+  generationId Int            @map("generation_id")
+  chunkIndex   Int            @map("chunk_index")
+  dataBlob     Bytes          @map("data_blob")
+
+  snapshot     ExportSnapshot @relation(fields: [snapshotId], references: [id], onDelete: Cascade)
+
+  @@id([snapshotId, generationId, chunkIndex])
+  @@map("export_snapshot_chunks")
+}
+
+model AuditLog {
+  id         String       @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId   String       @map("tenant_id") @db.Uuid
+  actorId    String?      @map("actor_id") @db.Uuid
+  entityName String       @map("entity_name") @db.VarChar(50)
+  entityId   String       @map("entity_id") @db.Uuid
+  action     String       @db.VarChar(20)
+  diff       Json
+  entryHash  String       @map("entry_hash") @db.VarChar(64)
+  createdAt  DateTime     @default(now()) @map("created_at") @db.Timestamptz()
+
+  organization Organization @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@id([id, createdAt])
+  @@map("audit_logs")
+}
+
+model AuditAmendment {
+  id                   String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  auditLogId           String   @map("audit_log_id") @db.Uuid
+  tenantId             String   @map("tenant_id") @db.Uuid
+  targetEntityName     String   @map("target_entity_name") @db.VarChar(50)
+  targetEntityId       String   @map("target_entity_id") @db.Uuid
+  originalEntryHash    String   @map("original_entry_hash") @db.VarChar(64)
+  amendedContentHash   String   @map("amended_content_hash") @db.VarChar(64)
+  ticketId             String   @unique @map("ticket_id") @db.VarChar(100)
+  keyId                String   @map("key_id") @db.VarChar(50)
+  canonicalPayloadHash String   @map("canonical_payload_hash") @db.VarChar(64)
+  authorizationSignature String @map("authorization_signature")
+  amendedAt            DateTime @default(now()) @map("amended_at") @db.Timestamptz()
+
+  @@map("audit_amendments")
+}
+
+model ConsumedErasureTicket {
+  ticketId   String   @id @map("ticket_id") @db.VarChar(100)
+  tenantId   String   @map("tenant_id") @db.Uuid
+  consumedAt DateTime @default(now()) @map("consumed_at") @db.Timestamptz()
+
+  @@map("consumed_erasure_tickets")
+}
+
+model ImportJob {
+  id                String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId          String       @map("tenant_id") @db.Uuid
+  actorId           String       @map("actor_id") @db.Uuid
+  entityName        String       @default("contact") @map("entity_name") @db.VarChar(50)
+  status            String       @default("PENDING") @db.VarChar(30)
+  deduplicationMode String       @default("SKIP") @map("deduplication_mode") @db.VarChar(20)
+  totalRows         Int          @default(0) @map("total_rows")
+  processedRows     Int          @default(0) @map("processed_rows")
+  successfulRows    Int          @default(0) @map("successful_rows")
+  failedRows        Int          @default(0) @map("failed_rows")
+  rawCsv            String?      @map("raw_csv")
+  errorSummary      Json?        @default("[]") @map("error_summary")
+  createdAt         DateTime     @default(now()) @map("created_at") @db.Timestamptz()
+  updatedAt         DateTime     @default(now()) @updatedAt @map("updated_at") @db.Timestamptz()
+
+  organization      Organization @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, id], map: "uq_import_jobs_tenant_id")
+  @@map("import_jobs")
+}
+

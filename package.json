@@ -1,0 +1,36 @@
+{
+  "name": "crm-monorepo",
+  "private": true,
+  "scripts": {
+    "build": "turbo run build",
+    "dev": "turbo run dev",
+    "lint": "turbo run lint",
+    "test": "turbo run test",
+    "test:phase0": "pnpm --filter @crm/api test:phase0",
+    "test:phase1": "pnpm --filter @crm/api test:phase1",
+    "test:phase2": "pnpm --filter @crm/api test:phase2",
+    "test:phase3": "pnpm --filter @crm/api test:phase3",
+    "test:phase4": "pnpm --filter @crm/api test:phase4",
+    "test:phase5": "pnpm --filter @crm/api test:phase5",
+    "test:team": "pnpm --filter @crm/api test:team",
+    "test:seed": "pnpm --filter @crm/api test:seed",
+    "db:start": "pnpm --filter @crm/api db:start",
+    "db:migrate": "pnpm --filter @crm/api db:migrate",
+    "db:seed": "pnpm --filter @crm/api seed"
+  },
+  "devDependencies": {
+    "turbo": "^2.4.4",
+    "typescript": "^5.8.2",
+    "prettier": "^3.5.3"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "@nestjs/core",
+      "@prisma/client",
+      "@prisma/engines",
+      "esbuild",
+      "prisma"
+    ]
+  },
+  "packageManager": "pnpm@12.11.2"
+}

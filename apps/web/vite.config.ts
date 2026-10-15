@@ -1,0 +1,28 @@
+import { defineConfig } from 'vitest/config';
+import react from '@vitejs/plugin-react';
+
+export default defineConfig({
+  plugins: [react()],
+  server: {
+    port: 3000,
+    proxy: {
+      '/api': {
+        target: 'http://localhost:4000',
+        changeOrigin: true,
+      },
+      '/healthz': {
+        target: 'http://localhost:4000',
+        changeOrigin: true,
+      },
+      '/readyz': {
+        target: 'http://localhost:4000',
+        changeOrigin: true,
+      },
+    },
+  },
+  test: {
+    environment: 'happy-dom',
+    globals: true,
+  },
+});
+
